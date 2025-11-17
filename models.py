@@ -87,6 +87,7 @@ class RootMLP_Classif(eqx.Module):
                  positional_enc_dim=0,               ## Dimension of the positional encoding to be added to the input
                  key=None):
 
+        # input_dim = 1 + positional_enc_dim + 2
         input_dim = 1 + positional_enc_dim
         output_dim = nb_classes
 

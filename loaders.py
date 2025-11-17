@@ -11,6 +11,7 @@ from PIL import Image
 import os
 import jax.tree as jtree
 
+import pickle
 
 
 
@@ -29,6 +30,9 @@ class TimeSeriesDataset:
         self.dataset = dataset
         n_envs, n_timesteps, n_dimensions = dataset.shape
 
+        if np.ndim(t_eval) == 1:
+            t_eval = t_eval[:, None]
+        
         # self.t_eval = t_eval
         # Let's replace t_eval of shape (n_envs, n_timesteps, 1) with positional encoding of dimention D
         if positional_enc is not None:
@@ -39,9 +43,9 @@ class TimeSeriesDataset:
                     pos_enc[pos, i] = np.sin(pos / (PE_cte ** (i / D)))
                     if i + 1 < D:
                         pos_enc[pos, i + 1] = np.cos(pos / (PE_cte ** (i / D)))
-            self.t_eval = np.concatenate((t_eval[:, None], pos_enc), axis=-1)
+            self.t_eval = np.concatenate((t_eval, pos_enc), axis=-1)
         else:
-            self.t_eval = t_eval[:, None]
+            self.t_eval = t_eval
 
         self.total_envs = n_envs
 
@@ -56,10 +60,17 @@ class TimeSeriesDataset:
         self.data_size = n_dimensions
 
     def __getitem__(self, idx):
+        # els_per_fake_idx = self.total_envs // 1024
+        # real_idx = idx * els_per_fake_idx + np.random.randint(0, els_per_fake_idx)
+        # idx = real_idx
+
         inputs = self.dataset[idx, :, :]
         outputs = self.labels[idx]
         t_eval = self.t_eval
         traj_len = self.traj_len
+
+        # ## Replace the first dimendion of t_eval with the actial inputs's first dimension
+        # t_eval[:, 0] = inputs[:, 0]
 
         if self.traj_prop == 1.0:
             ## Straightforward approach, no subsampling ###
@@ -73,7 +84,8 @@ class TimeSeriesDataset:
             return (trajs, ts), outputs
 
     def __len__(self):
-        return self.total_envs
+        # return self.total_envs
+        return 1024
 
 
 class DynamicsDataset(TimeSeriesDataset):
@@ -331,13 +343,230 @@ class UEADataset(TimeSeriesDataset):
         super().__init__(dataset, labels, t_eval, traj_prop=1.0, positional_enc=positional_enc)
 
 
-class PathFinderDataset(UEADataset):
+# class PathFinderDataset(UEADataset):
+#     """
+#     Alias for the UEADataset (useful  for clarity)
+#     """
+#     def __init__(self, data_dir, normalize=True, min_max=None, positional_enc=None):
+#         super().__init__(data_dir, normalize=normalize, min_max=min_max, positional_enc=positional_enc)
+
+class PathFinderDataset(TimeSeriesDataset):
     """
     Alias for the UEADataset (useful  for clarity)
     """
-    def __init__(self, data_dir, normalize=True, min_max=None):
-        super().__init__(data_dir, normalize=normalize, min_max=min_max)
+    def __init__(self, data_dir, normalize=True, min_max=None, positional_enc=None):
+        try:
+            raw_data = np.load(data_dir)
+        except:
+            raise ValueError(f"Data not loadable at {data_dir}")
 
+        ## Normalise the dataset between 0 and 1
+        dataset = raw_data["data"].astype(np.float32)
+
+        ######## FIRST APPORCH ###
+        ## There are raster-scanned images of size 1024=32x32, so reshape accordingly.
+            ## First, reshaped them to (n_envs, 32,32, 1)
+            ## Next, calculate the normalised x,y coordinates and append them as extra channels, so shape is (n_envs, 32,32, 3). The pixel should be in the range (-1,1) 
+            ## Finally, reshape to (n_envs, timesteps=1024, features=3)
+        H, W = 32, 32
+        # 1. reahape
+        # dataset = dataset.reshape(dataset.shape[0], W, H, 1)
+        # 2.pixel coords
+        pixel_coords = np.zeros((W, H, 2))
+        for i in range(W):
+            for j in range(H):
+                x = (i) / (W - 1) * 2 - 1
+                y = (j) / (H - 1) * 2 - 1
+                pixel_coords[i, j, 0] = x
+                pixel_coords[i, j, 1] = y
+        # pixel_coords = np.tile(pixel_coords[None, ...], (dataset.shape[0], 1, 1, 1))   ## Shape: (n_envs, W, H, 2)
+        # dataset = np.concatenate((dataset, pixel_coords), axis=-1)    ## Shape: (n_envs, W, H, 3)
+        # # 3.reshape
+        # dataset = dataset.reshape(dataset.shape[0], W*H, 3)
+
+
+        # ######## SECOND APPORCH ###
+        # ## Inflate the time series from (n_envs, timesteps=1024, features=1) to (n_envs, timesteps=1024, features=33) by appending the entire row of pixels each pixel belogns to
+        # dataset = dataset.reshape(dataset.shape[0], W, H, 1)   ## Shape: (n_envs, W, H, 1)
+        # row_pixels = np.zeros((W, H, H))    ## Shape: (W, H, H)
+        # for i in range(W):
+        #     for j in range(H):
+        #         row_pixels[i, j, :] = dataset[0, i, :, 0]    ## Take the entire row of pixels
+        # row_pixels = np.tile(row_pixels[None, ...], (dataset.shape[0], 1, 1, 1))   ## Shape: (n_envs, W, H, H)
+        # dataset = np.concatenate((dataset, row_pixels), axis=-1)    ## Shape: (n_envs, W, H, H+1)
+        # dataset = dataset.reshape(dataset.shape[0], W*H, H+1)   ## Shape: (n_envs, timesteps=1024, features=33)
+
+
+        # ######## THIRD APPORCH ###
+        # ## Each pixels has (x,y) coordinates appended as extra features, and its four neightboars' pixel values appended as extra features too
+        # dataset = dataset.reshape(dataset.shape[0], W, H, 1)   ## Shape: (n_envs, W, H, 1)
+        # neighbor_pixels = np.zeros((dataset.shape[0], W, H, 4))    ## Shape: (n_envs, W, H, 4)
+        # for i in range(W):
+        #     for j in range(H):
+        #         # Up
+        #         if i > 0:
+        #             neighbor_pixels[:, i, j, 0] = dataset[:, i-1, j, 0]
+        #         else:
+        #             neighbor_pixels[:, i, j, 0] = 0.0
+        #         # Down
+        #         if i < W - 1:
+        #             neighbor_pixels[:, i, j, 1] = dataset[:, i+1, j, 0]
+        #         else:
+        #             neighbor_pixels[:, i, j, 1] = 0.0
+        #         # Left
+        #         if j > 0:
+        #             neighbor_pixels[:, i, j, 2] = dataset[:, i, j-1, 0]
+        #         else:
+        #             neighbor_pixels[:, i, j, 2] = 0.0
+        #         # Right
+        #         if j < H - 1:
+        #             neighbor_pixels[:, i, j, 3] = dataset[:, i, j+1, 0]
+        #         else:
+        #             neighbor_pixels[:, i, j, 3] = 0.0
+        # dataset = np.concatenate((dataset, neighbor_pixels), axis=-1)    ## Shape: (n_envs, W, H, 5)
+        # dataset = dataset.reshape(dataset.shape[0], W*H, 5)   ## Shape: (n_envs, timesteps=1024, features=5)
+
+        ############ FOURTH APPROACH ###
+        ## Put the dataset in the range (0,1) firstm instead of the currnet (-1,1)
+        # dataset = (dataset + 1) / 2    ## Now in (0,1)
+
+        ## Cumulative sums appended as extra features
+        cum_sum = np.cumsum(dataset, axis=1)    ## Shape: (n_envs, timesteps=1024, features=1)
+        dataset = np.concatenate((dataset, cum_sum), axis=-1)    ## Shape: (n_envs, timesteps=1024, features=2)
+        ## Concate time as channel as well
+        time_channel = np.linspace(0., 1., W*H)[None, :, None]   ## Shape: (1, timesteps=1024, 1)
+        time_channel = np.tile(time_channel, (dataset.shape[0], 1, 1))   ## Shape: (n_envs, timesteps=1024, 1)
+        dataset = np.concatenate((dataset, time_channel), axis=-1)    ## Shape: (n_envs, timesteps=1024, features=3)
+
+        # ## COncat the pixel coords as well
+        # pixel_coords_tile = np.tile(pixel_coords[None, ...], (dataset.shape[0], 1, 1, 1))   ## Shape: (n_envs, W, H, 2)
+        # dataset = np.concatenate((dataset, pixel_coords_tile.reshape(dataset.shape[0], W*H, 2)), axis=-1)    ## Shape: (n_envs, timesteps=1024, features=5)
+
+
+        # dataset = cum_sum       ## Just for now!!!
+
+        if min_max is not None:
+            self.min_data = min_max[0]
+            self.max_data = min_max[1]
+        else:
+            self.min_data = np.min(dataset, axis=(0, 1), keepdims=True)
+            self.max_data = np.max(dataset, axis=(0, 1), keepdims=True)
+
+        if normalize:
+            dataset = (dataset - self.min_data) / (self.max_data - self.min_data)
+            ## Put things between -1 and 1
+            dataset = (dataset - 0.5) / 0.5
+
+        n_envs, n_timesteps, n_dimensions = dataset.shape
+
+        t_eval = np.linspace(0., 1., n_timesteps)
+        ## Concatenate the pixel coords to t_eval instead of the data
+        pixel_coords_flat = pixel_coords.reshape(W*H, 2)   ## Shape: (timesteps, 2)
+        t_eval = np.concatenate((t_eval[:, None], pixel_coords_flat), axis=-1)
+
+        labels = raw_data["labels"].astype(np.int32).squeeze()
+
+        self.total_envs = n_envs
+        self.nb_classes = int(np.max(labels)) + 1
+        self.num_steps = n_timesteps
+        self.data_size = n_dimensions
+
+        super().__init__(dataset, labels, t_eval, traj_prop=1.0, positional_enc=positional_enc)
+
+ 
+
+ 
+class LRAPickleDataset(torch.utils.data.Dataset):
+    def __init__(self, data_dir, data_split, normalize=False, min_max=None, positional_enc=None):
+        """
+        data_dir: directory where the pickle files are stored
+        data_split: 'train' or 'test' to select the appropriate pickle file
+        """
+
+        file_path = os.path.join(data_dir, f"{data_split}.pickle")
+
+        # Load the pickle file
+        with open(file_path, "rb") as f:
+            data = pickle.load(f)
+
+        ## Scale to (-1,1)
+        self.dataset = data
+
+        self.total_envs = len(data)
+        print("Example shape:", data[0]['input_ids_0'].shape, "dtype:", data[0]['input_ids_0'].dtype, flush=True)
+
+        self.num_steps = data[0]['input_ids_0'].shape[0]
+        # self.n_dimensions = data[0]['input_ids_0'].shape[1]
+        self.data_size = 1
+        self.nb_classes = 10
+
+        t_eval = np.linspace(0., 1., self.num_steps)
+        self.t_eval = t_eval
+ 
+        ## Print as many quantities for debugging as possible:
+        print(f"Loaded {data_split} dataset from {file_path} with {self.total_envs} samples, each of shape ({self.num_steps}, {self.data_size})")
+
+        H, W = 32, 32
+        ## Calculate normalised pixel coordinates for each time step
+        pixel_coords = np.zeros((self.num_steps, 2))
+        for i in range(W):
+            for j in range(H):
+                x = (i) / (W - 1) * 2 - 1
+                y = (j) / (H - 1) * 2 - 1
+                pixel_coords[i*H + j, 0] = x
+                pixel_coords[i*H + j, 1] = y
+        self.pixel_coords = pixel_coords    ## Shape: (timesteps, 2)
+
+
+    def __getitem__(self, idx):
+        # ## idx is a fake index from 0 to 512
+        # ## I want to use to pick another (real) index from 0 to total_envs
+        # els_per_fake_idx = self.total_envs // 512
+        # real_idx = idx * els_per_fake_idx + np.random.randint(0, els_per_fake_idx)
+        # idx = real_idx
+
+        item = self.dataset[idx]
+        sequence = item['input_ids_0'][:, None]              # NumPy array
+        label = item['label']
+        # t_eval = self.t_eval[:, None]
+
+        ## Scale to (-1,1)
+        # sequence = sequence/255.0
+        sequence = (sequence/255.0 - 0.5) / 0.5             ####TODO: restore this for cifar10
+        # sequence = sequence/10.0             ####TODO: restore this for listops
+        t_eval = sequence ### Just for now !
+
+        # cum_sum = np.cumsum(sequence, axis=0) / 1024   ## Shape: (timesteps, features=1)
+
+        # ## Convert pixel coords of dim 2 into an array of dim 1 by reducing x and y in some clever way 
+        # # new_pixel_coords = self.pixel_coords[:, 0] + self.pixel_coords[:, 1] / 2.0    ## Shape: (timesteps,)
+        # # The distance from the center (0,0)
+        # new_pixel_coords = np.sqrt(self.pixel_coords[:, 0]**2 + self.pixel_coords[:, 1]**2)    ## Shape: (timesteps,)
+
+        # ## Concat sequence, cum_sum, and pixel coords as extra features
+        # # sequence = np.concatenate((sequence, cum_sum, self.pixel_coords), axis=-1)    ## Shape: (timesteps, features=3)
+        # sequence = np.concatenate((sequence, cum_sum, new_pixel_coords[:, None]), axis=-1)    ## Shape: (timesteps, features=3)
+
+        ## Concat t_eval and pixel coords as well
+        # t_eval = np.concatenate((t_eval, self.pixel_coords), axis=-1)    ## Shape: (timesteps, 3)
+
+        # Convert to torch tensors
+        # sequence = torch.tensor(sequence, dtype=torch.float32).unsqueeze(-1)  # shape: (seq_len, 1)
+        # label = torch.tensor(label, dtype=torch.long)
+ 
+        return (sequence, t_eval), label
+
+
+    # def __getitem__(self, idx):
+    #     inputs = self.dataset[idx, :, :]
+    #     outputs = self.labels[idx]
+    #     t_eval = self.t_eval
+
+    #     return (inputs, t_eval), outputs
+
+    def __len__(self):
+        return self.total_envs
+        # return 512
 
 
 class LibriBrainDataset(TimeSeriesDataset):
@@ -1451,15 +1680,32 @@ def make_dataloaders(data_folder, config):
         min_res = None
 
     elif dataset in ["pathfinder"]:
-        trainloader = NumpyLoader(PathFinderDataset(data_folder+"train.npz", normalize=False, min_max=None),
+        trainloader = NumpyLoader(PathFinderDataset(data_folder+"train.npz", normalize=False, min_max=None, positional_enc=positional_enc),
+                                batch_size=batch_size, 
+                                shuffle=True, 
+                                num_workers=4)
+        valloader = NumpyLoader(PathFinderDataset(data_folder+"val.npz", normalize=False, min_max=None, positional_enc=positional_enc),
+                                    batch_size=batch_size, 
+                                    shuffle=False, 
+                                    num_workers=4)
+        testloader = NumpyLoader(PathFinderDataset(data_folder+"test.npz", normalize=False, min_max=None, positional_enc=positional_enc),
+                                    batch_size=batch_size, 
+                                    shuffle=False, 
+                                    num_workers=4)
+        nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
+        print("Training sequence length:", seq_length)
+        min_res = 32
+
+    elif dataset in ["lra"]:
+        trainloader = NumpyLoader(LRAPickleDataset(data_folder, "train", normalize=False, min_max=None, positional_enc=positional_enc),
                                 batch_size=batch_size, 
                                 shuffle=True, 
                                 num_workers=24)
-        valloader = NumpyLoader(PathFinderDataset(data_folder+"val.npz", normalize=False, min_max=None),
+        valloader = NumpyLoader(LRAPickleDataset(data_folder, "dev", normalize=False, min_max=None, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
                                     num_workers=24)
-        testloader = NumpyLoader(PathFinderDataset(data_folder+"test.npz", normalize=False, min_max=None),
+        testloader = NumpyLoader(LRAPickleDataset(data_folder, "test", normalize=False, min_max=None, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
                                     num_workers=24)

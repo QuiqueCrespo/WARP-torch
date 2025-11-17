@@ -176,8 +176,8 @@ fig, axs = plt.subplots(4, 4, figsize=(10, 10), sharex=True)
 colors = ['r', 'g', 'b', 'c', 'm', 'y']
 
 dataset = config['general']['dataset']
-image_datasets = ["mnist", "mnist_fashion", "cifar", "celeba", "pathfinder"]
-dynamics_datasets = ["lorentz63", "lorentz96", "lotka", "trends", "mass_spring_damper", "cheetah", "electricity", "sine"]
+image_datasets = ["mnist", "mnist_fashion", "cifar", "celeba", "pathfinder", "lra"]
+dynamics_datasets = ["lorentz63", "lorentz96", "lotka", "trends", "mass_spring_damper", "cheetah", "electricity", "sine"] #, "lra"]
 repeat_datasets = ["lotka", "arc_agi", "icl", "traffic", "mitsui"]
 
 res = (width, width, data_size)
@@ -190,7 +190,7 @@ for i in range(4):
     for j in range(4):
         idx = np.random.randint(0, in_sequence.shape[0])
         if dataset in image_datasets:
-            to_plot = in_sequence[idx].reshape(res)
+            to_plot = in_sequence[idx].reshape(res)[...,:3]
             if dataset=="celeba":
                 to_plot = (to_plot + 1) / 2
             axs[i, j].imshow(to_plot, cmap='gray')
@@ -404,6 +404,7 @@ if train:
     opt = optax.chain(
         optax.clip(config['optimizer']['gradients_lim']),
         optax.adabelief(config['optimizer']['init_lr']),
+        # optax.adamax(config['optimizer']['init_lr']),
         optax.contrib.reduce_on_plateau(
             patience= config['optimizer']['on_plateau']['patience'],
             cooldown=config['optimizer']['on_plateau']['cooldown'],
@@ -574,7 +575,10 @@ fig, (ax, ax2) = plt.subplots(1, 2, figsize=(16, 5))
 
 clean_losses = np.array(losses)
 train_steps = np.arange(len(losses))
-loss_name = "NLL" if use_nll_loss else r"$L_2$"
+if not classification:
+    loss_name = "NLL" if use_nll_loss else r"$L_2$"
+else:
+    loss_name = "Cross-Entropy"
 ax = sbplot(train_steps, clean_losses, color="purple", title="Loss History", x_label='Train Steps', y_label=loss_name, ax=ax, y_scale="linear" if use_nll_loss else "log", label="Train");
 ax.legend(fontsize=16, loc='upper left')
 ax.yaxis.label.set_color('purple')
@@ -729,7 +733,7 @@ if not classification:
             eps = 0.04
 
             if dataset in image_datasets:
-                to_plot = x.reshape(res)
+                to_plot = x.reshape(res)[...,:3]
                 if dataset=="celeba":
                     to_plot = (to_plot + 1) / 2
                 axs[i, nb_cols*j].imshow(to_plot, cmap='gray')
@@ -748,7 +752,7 @@ if not classification:
             # axs[i, nb_cols*j].axis('off')
 
             if dataset in image_datasets:
-                to_plot = x_recons.reshape(res)
+                to_plot = x_recons.reshape(res)[...,:3]
                 if dataset=="celeba":
                     to_plot = (to_plot + 1) / 2
                 axs[i, nb_cols*j+1].imshow(to_plot, cmap='gray')
@@ -768,7 +772,7 @@ if not classification:
             if use_nll_loss and dataset not in repeat_datasets:
                 logger.info(f"Min/Max Uncertainty: {np.min(xs_uncert):.3f}, {np.max(xs_uncert):.3f}")
                 if dataset in image_datasets:
-                    to_plot = xs_uncert[i*4+j].reshape(res)
+                    to_plot = xs_uncert[i*4+j].reshape(res)[...,:3]
                     axs[i, nb_cols*j+2].imshow(to_plot, cmap='gray')
                 else:
                     to_plot = xs_uncert[i*4+j]
@@ -923,7 +927,7 @@ if classification:
             idx = i*4+j
 
             if dataset in image_datasets:
-                to_plot = in_sequence[idx].reshape(res)
+                to_plot = in_sequence[idx].reshape(res)[...,:3]
                 axs[i, j].imshow(to_plot, cmap='gray')
 
             else:
@@ -1029,7 +1033,7 @@ if dataset == "icl":
     ax.set_title("ICL Dataset's Queries Only")
 
     ## Add a diagonal line
-    ax.plot([np.min(Ys), np.max(Ys)], [np.min(Ys), np.max(Ys)], color='black', linestyle='--', linewidth=2, label="$y_q = \hat{y}_q$")
+    ax.plot([np.min(Ys), np.max(Ys)], [np.min(Ys), np.max(Ys)], color='black', linestyle='--', linewidth=2, label=r"$y_q = \hat{y}_q$")
     ax.legend()
     plt.draw();
     plt.savefig(plots_folder+"icl_query_only.png", dpi=100, bbox_inches='tight')

@@ -1,10 +1,10 @@
 # General settings
 general:
-  seed: 2026
+  seed: 2028
   classification: True
   train: True
-  dataset: "pathfinder"
-  data_path: "./data/pathfinder/32/"
+  dataset: "lra"
+  data_path: "./data/lra/listops/"
   save_path: null
 
 # Data hyperparameters
@@ -19,13 +19,13 @@ model:
   root_depth: 1
   root_activation: "sin"
   root_final_activation: null
-  init_state_layers: 1
-  root_output_dim: 2
+  init_state_layers: 0
+  root_output_dim: 10
   input_prev_data: False
   # positional_encoding: [6, 20]
   positional_encoding: null
   # conv_embedding: null
-  conv_embedding: [32, 1024, 0]
+  conv_embedding: [64, 1024, 0]
   # conv_embedding: [32, 3, 0]
   nb_rnn_layers: 1
   weights_lim: null
@@ -49,8 +49,8 @@ optimizer:
 
 # Training/Inference configurations
 training:
-  nb_epochs: 200000
-  batch_size: 1024
+  nb_epochs: 10000
+  batch_size: 512
   autoregressive: False
   stochastic: False
   print_every: 50
