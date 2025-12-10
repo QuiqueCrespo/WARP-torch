@@ -70,10 +70,6 @@ class RootMLP(eqx.Module):
             return jnp.concatenate([mean, std], axis=-1)
 
 
-
-
-
-
 class RootMLP_Classif(eqx.Module):
     """ Root network \theta: t -> y_t, whose weights are the WSM hidden space for classification """
     network: eqx.Module
@@ -163,13 +159,6 @@ class ConvNet1D(eqx.Module):
             if self.activation is not None:
                 y = self.activation(y)
         return y
-
-
-
-
-
-
-
 
 
 

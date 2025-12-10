@@ -9,7 +9,7 @@
 
 from utils import *
 from loaders import *
-from models import *
+from models_torch import *
 
 import jax
 print("\n\nAvailable devices:", jax.devices())
