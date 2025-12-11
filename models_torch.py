@@ -286,7 +286,11 @@ class WSM(nn.Module):
         self.Bs = nn.ParameterList()
         self.thetas_init = nn.ModuleList()
 
-        pos_enc_dim = positional_encoding[0] if positional_encoding is not None else 0
+        # Handle positional_encoding: can be None, False, or a tuple (dim, constant)
+        if positional_encoding and positional_encoding is not True:
+            pos_enc_dim = positional_encoding[0]
+        else:
+            pos_enc_dim = 0
 
         for i in range(nb_wsm_layers):
             # A. Define Input/Output dims for Root Network

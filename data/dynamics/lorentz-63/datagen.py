@@ -22,7 +22,7 @@ for i in range(64):
     # ax[i].set_ylabel("y")
 
 plt.tight_layout()
-plt.show()
+# plt.show()  # Commented out for non-interactive execution
 
 
 ## Save as train,npy

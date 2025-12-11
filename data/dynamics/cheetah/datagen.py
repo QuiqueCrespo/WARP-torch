@@ -87,7 +87,7 @@ for trace in range(31):
     plt.xlabel("Time step")
 
 plt.tight_layout()
-plt.show()
+# plt.show()  # Commented out for non-interactive execution
 # plt.savefig("cheetah_traces.png")
 
 

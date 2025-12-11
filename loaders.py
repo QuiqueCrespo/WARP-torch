@@ -9,9 +9,22 @@ import pandas as pd
 from typing import Tuple
 from PIL import Image
 import os
-import jax.tree as jtree
+import sys
+
+# Optional JAX import
+try:
+    import jax.tree as jtree
+    JAX_AVAILABLE = True
+except ImportError:
+    JAX_AVAILABLE = False
+    jtree = None
 
 import pickle
+
+# Determine optimal number of workers based on platform
+# macOS has issues with multiprocessing spawn, so use 0 workers
+# Linux can use more workers for better performance
+NUM_WORKERS = 0 if sys.platform == 'darwin' else 24
 
 
 
@@ -84,8 +97,8 @@ class TimeSeriesDataset:
             return (trajs, ts), outputs
 
     def __len__(self):
-        # return self.total_envs
-        return 1024
+        return self.total_envs
+        # return 1024  # Old hardcoded value - caused index errors
 
 
 class DynamicsDataset(TimeSeriesDataset):
@@ -1421,7 +1434,21 @@ class ICLDataset(torch.utils.data.Dataset):
 ################################ PUTTING IT ALL TOGETHER ########################################
 
 def numpy_collate(batch):
-  return jtree.map(np.asarray, data.default_collate(batch))
+  """Collate batch and convert to numpy arrays."""
+  if JAX_AVAILABLE and jtree is not None:
+    return jtree.map(np.asarray, data.default_collate(batch))
+  else:
+    # Fallback: recursively convert PyTorch tensors to numpy
+    def _to_numpy(x):
+      if isinstance(x, torch.Tensor):
+        return x.cpu().detach().numpy()
+      elif isinstance(x, (list, tuple)):
+        return type(x)(_to_numpy(item) for item in x)
+      elif isinstance(x, dict):
+        return {k: _to_numpy(v) for k, v in x.items()}
+      else:
+        return np.asarray(x)
+    return _to_numpy(data.default_collate(batch))
 
 class NumpyLoader(data.DataLoader):
   def __init__(self, dataset, batch_size=1,
@@ -1464,11 +1491,11 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(MNISTDataset(data_folder, data_split="train", mini_res=downsample_factor, traj_prop=1.0, unit_normalise=False, fashion=fashion, positional_enc=positional_enc), 
                                 batch_size=batch_size, 
                                 shuffle=True,
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         testloader = NumpyLoader(MNISTDataset(data_folder, data_split="test", mini_res=downsample_factor, traj_prop=1.0, unit_normalise=False, fashion=fashion, positional_enc=positional_enc),
                                     batch_size=batch_size,
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         min_res = 28 // downsample_factor
 
@@ -1479,11 +1506,11 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(CIFARDataset(data_folder, data_split="train", mini_res=downsample_factor, traj_prop=1.0, unit_normalise=False), 
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         testloader = NumpyLoader(CIFARDataset(data_folder, data_split="test", mini_res=downsample_factor, traj_prop=1.0, unit_normalise=False),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         min_res = 32 // downsample_factor
 
@@ -1494,11 +1521,11 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(CelebADataset(data_folder+"celeba/", data_split="train", num_shots=np.prod(resolution), resolution=resolution, order_pixels=True, unit_normalise=False, positional_enc=positional_enc), 
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         testloader = NumpyLoader(CelebADataset(data_folder+"celeba/", data_split="test", num_shots=np.prod(resolution), resolution=resolution, order_pixels=True, unit_normalise=False, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         min_res = min(resolution)
 
@@ -1511,12 +1538,12 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(DynamicsDataset(data_folder+"train.npy", traj_length=traj_len, normalize=normalize, min_max=None), 
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         min_max = (trainloader.dataset.min_data, trainloader.dataset.max_data)
         testloader = NumpyLoader(DynamicsDataset(data_folder+"test.npy", traj_length=traj_len, normalize=normalize, min_max=min_max),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = None
@@ -1528,12 +1555,12 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(DynamicsRepeatDataset(data_folder+"train.npz", traj_length=traj_len, min_max=None), 
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         min_max = (trainloader.dataset.min_data, trainloader.dataset.max_data)
         testloader = NumpyLoader(DynamicsRepeatDataset(data_folder+"test.npz", traj_length=traj_len, min_max=min_max),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = None
@@ -1545,16 +1572,16 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(TrafficDataset(data_folder+"train.npz", traj_length=traj_len, min_max=None, positional_enc=positional_enc), 
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         min_max = (trainloader.dataset.min_data, trainloader.dataset.max_data)
         valloader = NumpyLoader(TrafficDataset(data_folder+"val.npz", traj_length=traj_len, min_max=min_max, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         testloader = NumpyLoader(TrafficDataset(data_folder+"test.npz", traj_length=traj_len, min_max=min_max, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = None
@@ -1567,16 +1594,16 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(MitsuiDataset(data_folder, partition="train", normalize=normalize, min_max=None, positional_enc=positional_enc), 
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         min_max = (trainloader.dataset.min_data, trainloader.dataset.max_data)
         valloader = NumpyLoader(MitsuiDataset(data_folder, partition="val", normalize=normalize, min_max=min_max, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         testloader = NumpyLoader(MitsuiDataset(data_folder, partition="test", normalize=normalize, min_max=min_max, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = None
@@ -1588,11 +1615,11 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(ARC_AGIDataset(data_folder+"train_", traj_length=traj_len, min_max=None), 
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         testloader = NumpyLoader(ARC_AGIDataset(data_folder+"test_", traj_length=traj_len, min_max=None),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = None
@@ -1607,11 +1634,11 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(ICLDataset(x_dim=data_size, seq_len=seq_length, num_envs=num_envs, positional_enc=positional_enc),
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         testloader = NumpyLoader(ICLDataset(x_dim=data_size, seq_len=seq_length, num_envs=num_envs, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes = -1
         data_size += 1  ## +1 for the output
 
@@ -1629,11 +1656,11 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(SpiralsDataset(data_folder+"train.npz", normalize=False, min_max=None),
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         testloader = NumpyLoader(SpiralsDataset(data_folder+"test.npz", normalize=False, min_max=None),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = None
@@ -1644,16 +1671,16 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(UEADataset(data_folder+"train.npz", normalize=normalize, min_max=None, positional_enc=positional_enc),
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         min_max = (trainloader.dataset.min_data, trainloader.dataset.max_data)
         valloader = NumpyLoader(UEADataset(data_folder+"val.npz", normalize=normalize, min_max=min_max, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         testloader = NumpyLoader(UEADataset(data_folder+"test.npz", normalize=normalize, min_max=min_max, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = None
@@ -1664,17 +1691,17 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(LibriBrainDataset(data_folder, partition="train", normalize=normalize, min_max=None, positional_enc=positional_enc),
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         min_max = (trainloader.dataset.min_data, trainloader.dataset.max_data)
         valloader = NumpyLoader(LibriBrainDataset(data_folder, partition="validation", normalize=normalize, min_max=min_max, positional_enc=positional_enc),
         # valloader = NumpyLoader(LibriBrainDataset(data_folder, partition="test", normalize=normalize, min_max=min_max, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         testloader = NumpyLoader(LibriBrainDataset(data_folder, partition="test", normalize=normalize, min_max=min_max, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = None
@@ -1683,15 +1710,15 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(PathFinderDataset(data_folder+"train.npz", normalize=False, min_max=None, positional_enc=positional_enc),
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=4)
+                                num_workers=NUM_WORKERS)
         valloader = NumpyLoader(PathFinderDataset(data_folder+"val.npz", normalize=False, min_max=None, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=4)
+                                    num_workers=NUM_WORKERS)
         testloader = NumpyLoader(PathFinderDataset(data_folder+"test.npz", normalize=False, min_max=None, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=4)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = 32
@@ -1700,15 +1727,15 @@ def make_dataloaders(data_folder, config):
         trainloader = NumpyLoader(LRAPickleDataset(data_folder, "train", normalize=False, min_max=None, positional_enc=positional_enc),
                                 batch_size=batch_size, 
                                 shuffle=True, 
-                                num_workers=24)
+                                num_workers=NUM_WORKERS)
         valloader = NumpyLoader(LRAPickleDataset(data_folder, "dev", normalize=False, min_max=None, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         testloader = NumpyLoader(LRAPickleDataset(data_folder, "test", normalize=False, min_max=None, positional_enc=positional_enc),
                                     batch_size=batch_size, 
                                     shuffle=False, 
-                                    num_workers=24)
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = 32
@@ -1718,18 +1745,18 @@ def make_dataloaders(data_folder, config):
         traj_len = None
 
         trainloader = NumpyLoader(DynamicsDataset(data_folder+"train.npy", traj_length=traj_len, normalize=normalize, min_max=None),
-                                batch_size=batch_size, 
-                                shuffle=True, 
-                                num_workers=24)
+                                batch_size=batch_size,
+                                shuffle=True,
+                                num_workers=NUM_WORKERS)
         min_max = (trainloader.dataset.min_data, trainloader.dataset.max_data)
         valloader = NumpyLoader(DynamicsDataset(data_folder+"val.npy", traj_length=traj_len, normalize=normalize, min_max=min_max),
-                                    batch_size=batch_size, 
-                                    shuffle=False, 
-                                    num_workers=24)
+                                    batch_size=batch_size,
+                                    shuffle=False,
+                                    num_workers=NUM_WORKERS)
         testloader = NumpyLoader(DynamicsDataset(data_folder+"test.npy", traj_length=traj_len, normalize=normalize, min_max=min_max),
-                                    batch_size=batch_size, 
-                                    shuffle=False, 
-                                    num_workers=24)
+                                    batch_size=batch_size,
+                                    shuffle=False,
+                                    num_workers=NUM_WORKERS)
         nb_classes, seq_length, data_size = trainloader.dataset.nb_classes, trainloader.dataset.num_steps, trainloader.dataset.data_size
         print("Training sequence length:", seq_length)
         min_res = None

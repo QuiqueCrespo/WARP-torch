@@ -130,7 +130,7 @@ def visualize_trajectory(trajectory, t, save_gif=False, filename="mass_spring_da
     plt.grid(True)
     
     plt.tight_layout()
-    plt.show()
+    # plt.show()  # Commented out for non-interactive execution
     
     if save_gif:
         # Create animation
@@ -220,7 +220,7 @@ def main():
     plt.grid(True)
 
     plt.tight_layout()
-    plt.show()
+    # plt.show()  # Commented out for non-interactive execution
 
 if __name__ == "__main__":
     main()

@@ -1,12 +1,21 @@
 import os
 import numpy as np
-import jax.tree as jtree
-import jax.numpy as jnp
-import equinox as eqx
 import logging
 import time
 import sys
 import matplotlib.pyplot as plt
+
+# Optional JAX imports - only needed for legacy JAX code
+try:
+    import jax.tree as jtree
+    import jax.numpy as jnp
+    import equinox as eqx
+    JAX_AVAILABLE = True
+except ImportError:
+    JAX_AVAILABLE = False
+    jtree = None
+    jnp = None
+    eqx = None
 
 
 
@@ -456,14 +465,17 @@ def log_return(data, lag=1):
 
 def f1_score_macro(y_true, y_pred, nb_classes):
     """ Compute the macro F1 score. """
+    # Use jnp if available, otherwise use np
+    xp = jnp if JAX_AVAILABLE and jnp is not None else np
+
     f1s = []
     for cls in range(nb_classes):
-        tp = jnp.sum((y_pred == cls) & (y_true == cls))
-        fp = jnp.sum((y_pred == cls) & (y_true != cls))
-        fn = jnp.sum((y_pred != cls) & (y_true == cls))
+        tp = xp.sum((y_pred == cls) & (y_true == cls))
+        fp = xp.sum((y_pred == cls) & (y_true != cls))
+        fn = xp.sum((y_pred != cls) & (y_true == cls))
         precision = tp / (tp + fp + 1e-8)
         recall = tp / (tp + fn + 1e-8)
         f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
         f1s.append(f1)
-    f1_macro = jnp.mean(jnp.array(f1s))
+    f1_macro = xp.mean(xp.array(f1s))
     return f1_macro

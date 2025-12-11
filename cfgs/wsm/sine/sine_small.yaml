@@ -42,7 +42,7 @@ optimizer:
 # Training/Inference configurations
 training:
   nb_epochs: 1000
-  batch_size: 10000
+  batch_size: 10
   autoregressive: True
   stochastic: False
   print_every: 100

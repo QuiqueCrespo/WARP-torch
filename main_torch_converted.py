@@ -293,7 +293,7 @@ def forward_pass(model, X, times, inference_start=None):
     times = torch.from_numpy(times).float().to(device)
 
     X_recons = model(X, times, inference_start)
-    return X_recons.cpu().numpy()
+    return X_recons.cpu().detach().numpy()
 
 
 val_criterion = config['training']['val_criterion']
@@ -604,13 +604,13 @@ logger.info(f"Best model found at epoch {best_val_loss_epoch} with {val_criterio
 if config["model"]["model_type"] == "wsm":
     # Visualise the distribution of values along the main diagonal of A
     fig, axs = plt.subplots(1, 2, figsize=(20, 10))
-    A_diag = torch.diag(model.As[0]).cpu().numpy()
+    A_diag = torch.diag(model.As[0]).cpu().detach().numpy()
     axs[0].hist(A_diag, bins=100)
     axs[0].set_title("Histogram of diagonal values of A")
 
     if hasattr(model.thetas_init[0], 'weight'):
-        theta_trained = model.thetas_init[0].weight.data.cpu().numpy().flatten()
-        theta_untrained = untrained_model.thetas_init[0].weight.data.cpu().numpy().flatten()
+        theta_trained = model.thetas_init[0].weight.data.cpu().detach().numpy().flatten()
+        theta_untrained = untrained_model.thetas_init[0].weight.data.cpu().detach().numpy().flatten()
         axs[1].hist(theta_trained, bins=100, label="After Training")
         axs[1].hist(theta_untrained, bins=100, alpha=0.5, label="Before Training", color='r')
         axs[1].set_title(r"Histogram of $\theta_0$ values")
@@ -634,7 +634,7 @@ if config["model"]["model_type"] == "wsm":
     min_val = -0.0000
     max_val = 0.00003
 
-    A_untrained = untrained_model.As[0].cpu().numpy()
+    A_untrained = untrained_model.As[0].cpu().detach().numpy()
     A_trained = model.As[0].cpu().detach().numpy()
 
     img = axs[0].imshow(A_untrained, cmap='viridis', vmin=min_val, vmax=max_val)

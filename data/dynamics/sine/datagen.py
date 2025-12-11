@@ -104,8 +104,8 @@ if __name__ == "__main__":
         trajectories = generate_sine_waves(nb_samples, seq_len, frequency, save_path)
 
         # Visualize
-        visualize_sine_waves(trajectories)
-        
+        # visualize_sine_waves(trajectories)  # Commented out for non-interactive execution
+
         # Example of how to load the saved data
         loaded_trajectories = np.load(save_path)
         print(f"Loaded trajectories shape: {loaded_trajectories.shape}")
