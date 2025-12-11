@@ -199,3 +199,21 @@ All identified bugs have been systematically fixed and tested. The codebase will
 - Fail gracefully with clear error messages
 
 No more "stupid errors" 🎉
+
+---
+
+## 🔧 ADDITIONAL FIX (Post-Testing)
+
+### 9. **Lorentz-63 Data Generation Script**
+- **Problem**: Script tried to load non-existent `noisy.pt` file
+- **Fix**: Rewrote to generate Lorenz-63 trajectories from scratch using scipy.integrate
+- **File**: `data/dynamics/lorentz-63/datagen.py`
+- **Impact**: Fully functional data generation for Lorenz attractor system
+
+**Generated:**
+- 48 training trajectories
+- 8 validation trajectories  
+- 16 test trajectories
+- Shape: (n_samples, 1000, 3) for x, y, z coordinates
+- Data range: [-26.55, 47.13]
+
