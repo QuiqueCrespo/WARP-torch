@@ -579,6 +579,11 @@ Examples:
         help="Skip checking if data files exist"
     )
     parser.add_argument(
+        "--auto-generate-data",
+        action="store_true",
+        help="Automatically generate missing data without prompting"
+    )
+    parser.add_argument(
         "--no-performance-logging",
         action="store_true",
         help="Disable performance logging and monitoring"
@@ -605,6 +610,14 @@ Examples:
     elif args.all_datasets:
         # Run default config for each dataset
         for dataset, configs in DATASET_CONFIGS.items():
+            # Check and generate data if needed
+            if not args.skip_data_check and not check_data_exists(dataset):
+                print(f"⚠️  Data files not found for {dataset}")
+                print(f"   Expected location: {DATASET_PATHS.get(dataset, 'unknown')}")
+                print(f"🔄 Auto-generating data for {dataset}...")
+                if not generate_data(dataset):
+                    print(f"✗ Failed to generate data for {dataset}. Skipping.")
+                    continue
             # Use first available config as default
             default_config = list(configs.values())[0]
             configs_to_run.append(default_config)
@@ -639,14 +652,22 @@ Examples:
         if not args.skip_data_check and not args.dry_run and not check_data_exists(args.dataset):
             print(f"⚠️  Data files not found for {args.dataset}")
             print(f"   Expected location: {DATASET_PATHS[args.dataset]}")
-            response = input(f"\nAttempt to generate data? [Y/n]: ")
-            if response.lower() != 'n':
+
+            # Auto-generate if flag is set or if running all datasets
+            if args.auto_generate_data or args.all_datasets or args.all_configs:
+                print(f"🔄 Auto-generating data for {args.dataset}...")
                 if not generate_data(args.dataset):
                     print("✗ Failed to generate data. Aborting.")
                     return 1
             else:
-                print("Aborting.")
-                return 1
+                response = input(f"\nAttempt to generate data? [Y/n]: ")
+                if response.lower() != 'n':
+                    if not generate_data(args.dataset):
+                        print("✗ Failed to generate data. Aborting.")
+                        return 1
+                else:
+                    print("Aborting.")
+                    return 1
 
     else:
         print("Error: No experiment specified.")
